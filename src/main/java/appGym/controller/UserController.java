@@ -1,16 +1,20 @@
 package appGym.controller;
 
 import appGym.DTO.RoleDTO;
+import appGym.DTO.UpdateUserDTO;
 import appGym.DTO.UserDTO;
 import appGym.model.Role;
 import appGym.model.User;
+import appGym.repository.RoleRepository;
 import appGym.repository.UserRepository;
 import appGym.service.UserService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -20,10 +24,14 @@ public class UserController {
 
     private final UserService userService;
     private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    public UserController(UserService userService, UserRepository userRepository) {
+    public UserController(UserService userService, UserRepository userRepository, RoleRepository roleRepository, PasswordEncoder passwordEncoder) {
         this.userService = userService;
         this.userRepository = userRepository;
+        this.roleRepository = roleRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @PostMapping
@@ -66,16 +74,31 @@ public class UserController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN') or #id == authentication.principal.id")
-    public ResponseEntity<UserDTO> updateUser(@PathVariable Long id, @RequestBody User user) {
-        User updatedUser = userService.updateUser(id, user);
-        // Convierte el usuario actualizado a DTO
-        UserDTO userDTO = new UserDTO(
-                updatedUser.getId(),
-                updatedUser.getUsername(),
-                updatedUser.getEmail(),
-                updatedUser.getRoles().stream().map(Role::getName).collect(Collectors.toList()) // Convierte los roles a nombres
-        );
-        return ResponseEntity.ok(userDTO);
+    public ResponseEntity<?> updateUser(@PathVariable Long id, @RequestBody UpdateUserDTO updateUserDTO) {
+        // Busca al usuario existente
+        User existingUser = userService.getUserById(id);
+
+        // Actualiza los datos básicos
+        existingUser.setUsername(updateUserDTO.getUsername());
+        existingUser.setEmail(updateUserDTO.getEmail());
+
+        // Solo actualiza la contraseña si se proporciona
+        if (updateUserDTO.getPassword() != null && !updateUserDTO.getPassword().isEmpty()) {
+            existingUser.setPassword(passwordEncoder.encode(updateUserDTO.getPassword()));
+        }
+
+        // Busca el rol
+        Role role = roleRepository.findById(updateUserDTO.getRolId())
+                .orElseThrow(() -> new RuntimeException("Rol no encontrado"));
+
+        // Asigna el nuevo rol
+        existingUser.getRoles().clear();  // Limpiar los roles existentes
+        existingUser.getRoles().add(role);  // Agregar el nuevo rol
+
+        // Guarda los cambios
+        userService.saveUser(existingUser);
+
+        return ResponseEntity.ok("Usuario actualizado correctamente");
     }
 
     @DeleteMapping("/{id}")
